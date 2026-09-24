@@ -29,6 +29,7 @@ class StoredNote:
     attachments: int = 0
     checked: int = 0
     unchecked: int = 0
+    pk: int = 0
 
 
 def _varint(buf: bytes, i: int) -> tuple[int, int]:
@@ -158,7 +159,7 @@ def read_folder(account: str, folder: str, store: Path = NOTESTORE) -> list[Stor
             )
             checked, unchecked = checklist_counts(zdata) if zdata else (0, 0)
             notes.append(
-                StoredNote(title, _core_date(created), _core_date(modified), tags, attachments, checked, unchecked)
+                StoredNote(title, _core_date(created), _core_date(modified), tags, attachments, checked, unchecked, pk)
             )
         return notes
     finally:
