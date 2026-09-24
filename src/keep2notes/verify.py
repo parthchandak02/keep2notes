@@ -57,8 +57,9 @@ class VerifyResult:
 
 
 def _key(title: str) -> str:
-    # Notes derives a display name from the first line and may trim it, so compare loosely.
-    return normalize_ws(title).rstrip("…").casefold()[:60]
+    # Notes names a note after its first line and may trim it, so compare loosely.
+    first = next((line for line in title.splitlines() if line.strip()), "")
+    return normalize_ws(first).rstrip("…").casefold()[:60]
 
 
 @dataclass

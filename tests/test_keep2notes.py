@@ -168,3 +168,4 @@ def test_compare_titles():
     r = compare_titles(["A", "B", "B"], ["B", "A", "C"])
     assert r.missing == ["B"] and r.extra == ["C"] and not r.ok
     assert compare_titles(["x  y"], ["x y"]).ok
+    assert compare_titles(["Trip\n\nFrom Sam  "], ["Trip"]).ok
