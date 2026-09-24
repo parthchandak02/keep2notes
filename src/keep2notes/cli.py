@@ -15,7 +15,8 @@ from .html_clean import enml_to_text, html_to_enml, normalize_ws
 from .model import KeepNote, load_keep_dir
 from .smoke import smoke_notes
 from .tags import label_to_tag
-from .verify import compare_titles, list_folders, note_titles
+from .notestore import read_folder
+from .verify import compare_titles, deep_compare, expected_from_enex, list_folders, note_titles
 
 console = Console()
 
@@ -156,7 +157,33 @@ def _titles_from_enex(paths: list[Path]) -> list[str]:
     return titles
 
 
+def cmd_verify_deep(args: argparse.Namespace) -> int:
+    expected = expected_from_enex([Path(p).expanduser() for p in args.enex])
+    try:
+        stored = read_folder(args.account, args.folder)
+    except (PermissionError, LookupError, FileNotFoundError) as e:
+        console.print(f"[red]{e}[/]")
+        return 2
+    problems = deep_compare(expected, stored)
+    t = Table(title=f"deep verify: {args.account}/{args.folder}")
+    t.add_column("check")
+    t.add_column("expected", justify="right")
+    t.add_column("in Notes", justify="right")
+    t.add_row("notes", str(len(expected)), str(len(stored)))
+    t.add_row("checked items", str(sum(e.checked for e in expected)), str(sum(s.checked for s in stored)))
+    t.add_row("unchecked items", str(sum(e.unchecked for e in expected)), str(sum(s.unchecked for s in stored)))
+    t.add_row("tags", str(sum(len(e.tags) for e in expected)), str(sum(len(s.tags) for s in stored)))
+    t.add_row("images", str(sum(e.resources for e in expected)), str(sum(s.attachments for s in stored)))
+    console.print(t)
+    for title, diffs in problems:
+        console.print(f"[red]{title}[/]: " + "; ".join(diffs), markup=True, highlight=False)
+    console.print("[green]all notes match[/]" if not problems else f"[red]{len(problems)} notes differ[/]")
+    return 0 if not problems else 1
+
+
 def cmd_verify(args: argparse.Namespace) -> int:
+    if args.deep:
+        return cmd_verify_deep(args)
     expected = _titles_from_enex([Path(p).expanduser() for p in args.enex])
     try:
         found = note_titles(args.account, args.folder)
@@ -210,6 +237,11 @@ def main(argv: list[str] | None = None) -> int:
     v.add_argument("enex", nargs="+")
     v.add_argument("--account", default="iCloud")
     v.add_argument("--folder", required=True)
+    v.add_argument(
+        "--deep",
+        action="store_true",
+        help="read NoteStore.sqlite (needs Full Disk Access) to check dates, tags, images, checklist state",
+    )
     v.set_defaults(func=cmd_verify)
 
     sh = sub.add_parser("show", help="Print the converted ENML body for notes matching a title")

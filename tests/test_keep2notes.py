@@ -134,6 +134,36 @@ def test_text_to_enml_url_trailing_punctuation():
     assert text_to_enml("see https://x.com/a).") == 'see <a href="https://x.com/a">https://x.com/a</a>).'
 
 
+def _pb_varint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        b = n & 0x7F
+        n >>= 7
+        out.append(b | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _pb(num: int, value) -> bytes:
+    if isinstance(value, int):
+        return _pb_varint(num << 3) + _pb_varint(value)
+    return _pb_varint(num << 3 | 2) + _pb_varint(len(value)) + value
+
+
+def test_checklist_counts_decodes_notestore_protobuf():
+    import gzip
+
+    from keep2notes.notestore import checklist_counts
+
+    def run(length, uuid=None, done=0):
+        style = _pb(1, 103) + _pb(5, _pb(1, uuid) + _pb(2, done)) if uuid else _pb(1, 0)
+        return _pb(5, _pb(1, length) + _pb(2, style))
+
+    note = _pb(2, b"Title\na\nb\nc\n") + run(6) + run(2, b"u1", 1) + run(1, b"u2") + run(1, b"u2") + run(2, b"u3", 1)
+    blob = gzip.compress(_pb(2, _pb(3, note)))
+    assert checklist_counts(blob) == (2, 1)
+
+
 def test_compare_titles():
     r = compare_titles(["A", "B", "B"], ["B", "A", "C"])
     assert r.missing == ["B"] and r.extra == ["C"] and not r.ok

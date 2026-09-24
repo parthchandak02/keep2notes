@@ -28,6 +28,8 @@ Archived notes are written to separate files so they can go into their own folde
    uv run keep2notes verify out/Active-01.enex --account iCloud --folder "Imported Notes"
    ```
 
+   Add `--deep` to also check created/modified dates, tags, images, and checked/unchecked state for every note. It reads a temporary copy of `NoteStore.sqlite`, so the app running it (Terminal, Cursor, etc.) needs Full Disk Access.
+
 `out/report.txt` lists the label-to-tag mapping, pinned notes, shared notes, and anything worth spot-checking.
 
 ## Recommended order
