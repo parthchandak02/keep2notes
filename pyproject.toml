@@ -1,0 +1,21 @@
+[project]
+name = "keep2notes"
+version = "0.1.0"
+description = "Convert Google Keep Takeout exports into ENEX files that Apple Notes imports with native checklists, tags, dates, and images."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["rich>=13"]
+
+[project.scripts]
+keep2notes = "keep2notes.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

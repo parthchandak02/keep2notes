@@ -1,0 +1,17 @@
+# Personal data: never commit
+Takeout/
+*.zip
+out/
+*.enex
+report.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+
+.DS_Store
