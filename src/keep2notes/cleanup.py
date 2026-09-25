@@ -28,6 +28,7 @@ from .model import KeepNote
 BLOCK_TYPES = {"heading", "text", "bullet", "number", "check", "blank"}
 _WORD_RE = re.compile(r"[^\W_]+(?:['’][^\W_]+)?")
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_LIST_NUM_RE = re.compile(r"^[ \t]*\d{1,3}[.)][ \t]+", re.M)
 
 
 def overlay_path(overlay_dir: Path, source: str) -> Path:
@@ -61,7 +62,10 @@ def render_blocks(blocks: list[dict]) -> str:
         if open_list and list_tag != open_list:
             out.append(f"</{open_list}>")
             open_list = None
-        text = _inline(b.get("text", ""))
+        raw = b.get("text", "")
+        if kind == "number":
+            raw = _LIST_NUM_RE.sub("", raw, count=1)
+        text = _inline(raw)
         if list_tag:
             if not open_list:
                 out.append(f"<{list_tag}>")
@@ -174,7 +178,8 @@ def validate_overlay(note: KeepNote, overlay: dict) -> OverlayReport:
 
     new_title = overlay.get("title", note.title) or ""
     new_text = new_title + "\n" + "\n".join(_BOLD_RE.sub(r"\1", b.get("text", "")) for b in blocks)
-    old_text = note.title + "\n" + note.text + "\n" + "\n".join(i.text for i in note.items)
+    body = _LIST_NUM_RE.sub("", note.text) if any(b["type"] == "number" for b in blocks) else note.text
+    old_text = note.title + "\n" + body + "\n" + "\n".join(i.text for i in note.items)
     new_words = set(_words(new_text))
     exempt = _hashtag_line_words(note)
     new_list = sorted(new_words)
