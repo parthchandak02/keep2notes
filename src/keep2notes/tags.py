@@ -1,6 +1,7 @@
 """Map Keep label names to Apple Notes tag names.
 
-Apple Notes tags are a single "word": letters, numbers, hyphens, underscores. Spaces end a tag.
+Apple Notes tags are a single "word": a space ends the tag. Labels become PascalCase text with any
+emoji moved to the end, e.g. "3D Printing 🤖" -> "3DPrinting🤖", "Movies & Shows 🎥🍿" -> "MoviesShows🎥🍿".
 """
 
 from __future__ import annotations
@@ -22,22 +23,17 @@ def _is_emoji(ch: str) -> bool:
 
 def label_to_tag(label: str, strip_emoji: bool = False) -> str:
     text = unicodedata.normalize("NFC", label).strip()
-    out = []
-    for ch in text:
-        if _is_emoji(ch):
-            out.append("" if strip_emoji else ch)
-        elif ch.isalnum() or ch in "_-":
-            out.append(ch)
-        else:
-            out.append("-")
-    tag = re.sub(r"-{2,}", "-", "".join(out)).strip("-")
+    emoji = "".join(ch for ch in text if _is_emoji(ch)).lstrip("".join(_JOINERS))
+    plain = "".join(" " if _is_emoji(ch) else ch for ch in text)
+    words = re.findall(r"[^\W_]+", plain)
+    name = "".join(w[:1].upper() + w[1:] for w in words)
+    tag = name if strip_emoji else name + emoji
     if tag:
         return tag
     if strip_emoji:
         names = [unicodedata.name(ch, "") for ch in text if ch not in _JOINERS]
-        words = [n.split()[-1].lower() for n in names if n]
-        return "-".join(words) or "label"
-    return "label"
+        return "".join(n.split()[-1].capitalize() for n in names if n) or "Label"
+    return "Label"
 
 
 def labels_to_tags(labels: list[str], strip_emoji: bool = False) -> list[str]:

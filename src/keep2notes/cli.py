@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -10,12 +11,14 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+from .cleanup import load_overlays, note_payload, render_blocks, validate_overlay, write_chunks
 from .enex import Options, note_body, note_resources, note_tags, note_title, write_enex
 from .html_clean import enml_to_text, html_to_enml, normalize_ws
 from .model import KeepNote, load_keep_dir
 from .smoke import smoke_notes
 from .tags import label_to_tag
 from .notestore import read_folder
+from .review import write_review
 from .verify import compare_titles, deep_compare, expected_from_enex, list_folders, note_titles
 
 console = Console()
@@ -113,6 +116,24 @@ def cmd_convert(args: argparse.Namespace) -> int:
     trashed = [n for n in notes if n.trashed]
     if not args.include_trashed:
         notes = [n for n in notes if not n.trashed]
+    empty = [n for n in notes if n.is_empty]
+    if not args.keep_empty:
+        notes = [n for n in notes if not n.is_empty]
+    if args.overlays:
+        overlays = load_overlays(Path(args.overlays).expanduser())
+        bad = []
+        for n in notes:
+            ov = overlays.get(n.source)
+            if ov is None:
+                continue
+            rep = validate_overlay(n, ov)
+            if rep.ok:
+                n.overlay = ov
+            else:
+                bad.append(n.source)
+        console.print(f"overlays applied: {sum(n.overlay is not None for n in notes)}, rejected: {len(bad)}")
+        for s in bad:
+            console.print(f"  [red]rejected[/] {s} (run cleanup-validate for details)")
 
     files: list[Path] = []
     if args.pilot:
@@ -132,10 +153,94 @@ def cmd_convert(args: argparse.Namespace) -> int:
     console.print(summary_table(notes, opts))
     if trashed and not args.include_trashed:
         console.print(f"[yellow]Skipped {len(trashed)} trashed notes[/]")
+    if empty and not args.keep_empty:
+        console.print(f"[yellow]Dropped {len(empty)} empty notes:[/] " + ", ".join(n.source for n in empty))
     for f in files:
         console.print(f"  {f}")
     console.print(f"[green]Report:[/] {out / 'report.txt'}  ({len(mismatches)} rich-text diffs to spot-check)")
     return 0
+
+
+def pick_cleanup_pilot(notes: list[KeepNote], limit: int) -> list[KeepNote]:
+    def dash_lines(n: KeepNote) -> int:
+        return sum(1 for line in n.text.splitlines() if line.lstrip().startswith("- "))
+
+    checks = [
+        lambda n: dash_lines(n) >= 5,
+        lambda n: any(line.strip().startswith("#") for line in n.text.splitlines()[:3]),
+        lambda n: len(n.items) > 25 and any(i.checked for i in n.items),
+        lambda n: 3 <= len(n.items) <= 12,
+        lambda n: "font-weight:700" in n.html,
+        lambda n: "\n" in n.title,
+        lambda n: bool(n.attachments) and len(n.text) > 20,
+        lambda n: bool(n.annotations) and len(n.text) > 40,
+        lambda n: n.archived and n.created.year < 2016 and len(n.text) > 80,
+        lambda n: 150 < len(n.text) < 600 and dash_lines(n) == 0,
+        lambda n: 1500 < len(n.text) < 4000,
+        lambda n: not n.title and len(n.text) > 30,
+    ]
+    picked: list[KeepNote] = []
+    for check in checks:
+        if len(picked) >= limit:
+            break
+        match = next((n for n in notes if n not in picked and not n.is_empty and check(n)), None)
+        if match:
+            picked.append(match)
+    return picked
+
+
+def cmd_cleanup_prep(args: argparse.Namespace) -> int:
+    notes = [n for n in load_keep_dir(Path(args.keep_dir).expanduser()) if not n.trashed and not n.is_empty]
+    out = Path(args.out).expanduser()
+    if args.skip_done:
+        done = set(load_overlays(Path(args.skip_done).expanduser()))
+        notes = [n for n in notes if n.source not in done]
+    if args.pilot:
+        pilot = pick_cleanup_pilot(notes, args.pilot)
+        (out / "chunks").mkdir(parents=True, exist_ok=True)
+        path = out / "chunks" / "pilot.json"
+        path.write_text(json.dumps([note_payload(n) for n in pilot], ensure_ascii=False, indent=1), encoding="utf-8")
+        console.print(f"[bold]Pilot chunk[/] {len(pilot)} notes -> {path}")
+        for n in pilot:
+            console.print(f"  - {n.source}")
+        return 0
+    paths = write_chunks(notes, out / "chunks", args.chunks)
+    console.print(f"{len(notes)} notes -> {len(paths)} chunks in {out / 'chunks'}")
+    for p in paths:
+        console.print(f"  {p.name}: {p.stat().st_size // 1024} KB")
+    return 0
+
+
+def cmd_cleanup_validate(args: argparse.Namespace) -> int:
+    notes = {n.source: n for n in load_keep_dir(Path(args.keep_dir).expanduser())}
+    overlays = load_overlays(Path(args.overlays).expanduser())
+    pairs = []
+    for source, ov in overlays.items():
+        note = notes.get(source)
+        if note is None:
+            console.print(f"[red]{source}: no matching Keep note[/]")
+            continue
+        rep = validate_overlay(note, ov)
+        if rep.ok:
+            note.overlay = ov
+            try:
+                note_body(note, [], Options())
+                ET.fromstring(f"<en-note>{render_blocks(ov['blocks'])}</en-note>")
+            except ET.ParseError as e:
+                rep.errors.append(f"invalid markup: {e}")
+            finally:
+                note.overlay = None
+        pairs.append((note, ov, rep))
+        status = "[green]ok[/]" if rep.ok else "[red]REJECT[/]"
+        console.print(f"{status} {source}  fixes={len(rep.typo_fixes)} added={len(rep.added)}", highlight=False)
+        for e in rep.errors[:8]:
+            console.print(f"    [red]{e}[/]", highlight=False)
+    bad = sum(not r.ok for _, _, r in pairs)
+    console.print(f"{len(pairs)} overlays, {len(pairs) - bad} ok, {bad} rejected")
+    if args.review:
+        path = write_review(Path(args.review).expanduser(), pairs)
+        console.print(f"review page: {path}")
+    return 0 if not bad else 1
 
 
 def cmd_smoke(args: argparse.Namespace) -> int:
@@ -226,7 +331,23 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--pilot", type=int, default=0, metavar="N", help="write Pilot.enex with N feature-covering notes")
     c.add_argument("--strip-emoji-tags", action="store_true")
     c.add_argument("--include-trashed", action="store_true")
+    c.add_argument("--keep-empty", action="store_true", help="keep notes with no title, text, items, or images")
+    c.add_argument("--overlays", metavar="DIR", help="apply validated cleaned-note overlays from DIR")
     c.set_defaults(func=cmd_convert)
+
+    cp = sub.add_parser("cleanup-prep", help="Write note chunks for editors (humans or agents) to clean")
+    cp.add_argument("keep_dir")
+    cp.add_argument("-o", "--out", default="out/cleanup")
+    cp.add_argument("--chunks", type=int, default=8)
+    cp.add_argument("--pilot", type=int, default=0, metavar="N", help="write a single pilot chunk of N varied notes")
+    cp.add_argument("--skip-done", metavar="DIR", help="exclude notes that already have an overlay in DIR")
+    cp.set_defaults(func=cmd_cleanup_prep)
+
+    cv = sub.add_parser("cleanup-validate", help="Check overlays against the originals")
+    cv.add_argument("keep_dir")
+    cv.add_argument("overlays")
+    cv.add_argument("--review", metavar="HTML", help="also write a before/after review page")
+    cv.set_defaults(func=cmd_cleanup_validate)
 
     s = sub.add_parser("smoke", help="Write Smoke.enex with synthetic one-feature-each notes")
     s.add_argument("-o", "--out", default="out")

@@ -11,6 +11,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape, quoteattr
 
 from . import __version__
+from .cleanup import render_blocks
 from .html_clean import html_to_enml, inline_html_to_enml, plain_to_enml, text_to_enml
 from .model import KeepNote
 from .tags import labels_to_tags
@@ -45,6 +46,8 @@ def enex_date(dt: datetime) -> str:
 
 
 def note_title(note: KeepNote) -> str:
+    if note.overlay and note.overlay.get("title"):
+        return note.overlay["title"].strip()[:TITLE_MAX]
     if note.title:
         return note.title[:TITLE_MAX]
     lines = [line.strip() for line in note.text.splitlines() if line.strip()]
@@ -72,7 +75,9 @@ def note_resources(note: KeepNote) -> list[Resource]:
 
 def note_body(note: KeepNote, resources: list[Resource], opts: Options) -> str:
     parts: list[str] = []
-    if note.items:
+    if note.overlay:
+        parts.append(render_blocks(note.overlay["blocks"]))
+    elif note.items:
         for item in note.items:
             content = inline_html_to_enml(item.html) if item.html else text_to_enml(item.text)
             if not item.text.strip() and not content.strip():
@@ -89,6 +94,8 @@ def note_body(note: KeepNote, resources: list[Resource], opts: Options) -> str:
 
     if opts.include_links:
         haystack = note.text + "\n" + "\n".join(i.text for i in note.items)
+        if note.overlay:
+            haystack += "\n" + "\n".join(b.get("text", "") for b in note.overlay["blocks"])
         links = [a for a in note.annotations if a.url not in haystack]
         if links:
             parts.append("<div><br/></div><div><b>Links</b></div>")

@@ -43,6 +43,7 @@ class KeepNote:
     trashed: bool = False
     color: str = "DEFAULT"
     warnings: list[str] = field(default_factory=list)
+    overlay: dict | None = None
 
     @property
     def is_checklist(self) -> bool:

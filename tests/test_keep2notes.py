@@ -66,19 +66,20 @@ def test_image_resource_hash_matches_media(notes):
 
 def test_tags_emitted(notes):
     note, _, _ = parse_note(note_xml(notes["smoke-4"]))
-    assert [t.text for t in note.findall("tag")] == ["Gym-💪", "Outdoors-🚵🎢🏂🏄", "Movies-Shows-🎥🍿", "self-care", "🔒"]
+    assert [t.text for t in note.findall("tag")] == ["Gym💪", "Outdoors🚵🎢🏂🏄", "MoviesShows🎥🍿", "SelfCare", "🔒"]
     stripped = ET.fromstring(note_xml(notes["smoke-4"], Options(strip_emoji_tags=True)))
-    assert [t.text for t in stripped.findall("tag")] == ["Gym", "Outdoors", "Movies-Shows", "self-care", "lock"]
+    assert [t.text for t in stripped.findall("tag")] == ["Gym", "Outdoors", "MoviesShows", "SelfCare", "Lock"]
 
 
 @pytest.mark.parametrize(
     "label,tag,plain",
     [
-        ("Friends 🙋\u200d♂️", "Friends-🙋\u200d♂️", "Friends"),
-        ("Japan 🇯🇵", "Japan-🇯🇵", "Japan"),
-        ("Ideas 💡 w AI 🧠", "Ideas-💡-w-AI-🧠", "Ideas-w-AI"),
-        ("Go Green 🟢", "Go-Green-🟢", "Go-Green"),
-        ("tennis", "tennis", "tennis"),
+        ("Friends 🙋\u200d♂️", "Friends🙋\u200d♂️", "Friends"),
+        ("Japan 🇯🇵", "Japan🇯🇵", "Japan"),
+        ("3D Printing 🤖", "3DPrinting🤖", "3DPrinting"),
+        ("Go Green 🟢", "GoGreen🟢", "GoGreen"),
+        ("tennis", "Tennis", "Tennis"),
+        ("Fun  🚵🎢", "Fun🚵🎢", "Fun"),
     ],
 )
 def test_label_to_tag(label, tag, plain):
@@ -87,7 +88,53 @@ def test_label_to_tag(label, tag, plain):
 
 
 def test_labels_dedupe():
-    assert labels_to_tags(["A b", "A  b", "A-b"]) == ["A-b"]
+    assert labels_to_tags(["A b", "A  b", "A-b"]) == ["AB"]
+
+
+def _note(tmp_path, **kw):
+    from keep2notes.model import note_from_dict
+
+    d = {"title": "T", "createdTimestampUsec": 1_600_000_000_000_000, "userEditedTimestampUsec": 1_600_000_000_000_000}
+    d.update(kw)
+    return note_from_dict(d, tmp_path, source="t.json")
+
+
+def test_overlay_renders_blocks_and_validates(tmp_path):
+    from keep2notes.cleanup import validate_overlay
+
+    n = _note(tmp_path, textContent="#Trips ✈️\nPacking\n- pasport\n- snacks", labels=[{"name": "Trips ✈️"}])
+    ov = {
+        "title": "T",
+        "blocks": [
+            {"type": "heading", "text": "Packing"},
+            {"type": "check", "text": "Passport", "checked": False},
+            {"type": "bullet", "text": "**Snacks**"},
+        ],
+    }
+    rep = validate_overlay(n, ov)
+    assert rep.ok, rep.errors
+    assert ("pasport", "passport") in rep.typo_fixes
+    n.overlay = ov
+    _, en_note, content = parse_note(note_xml(n))
+    assert '<en-todo checked="false"/>Passport' in content
+    assert "<ul><li><b>Snacks</b></li></ul>" in content
+
+
+def test_overlay_rejects_dropped_words_and_checklist_changes(tmp_path):
+    from keep2notes.cleanup import validate_overlay
+
+    n = _note(tmp_path, listContent=[{"text": "Buy milk", "isChecked": True}, {"text": "Call bank", "isChecked": False}])
+    dropped = validate_overlay(n, {"blocks": [{"type": "check", "text": "Buy milk", "checked": True}]})
+    assert any("call" in e for e in dropped.errors)
+    flipped = validate_overlay(
+        n,
+        {"blocks": [{"type": "check", "text": "Buy milk", "checked": False}, {"type": "check", "text": "Call bank", "checked": False}]},
+    )
+    assert any("checked state changed" in e for e in flipped.errors)
+    as_bullets = validate_overlay(
+        n, {"blocks": [{"type": "bullet", "text": "Buy milk"}, {"type": "bullet", "text": "Call bank"}]}
+    )
+    assert any("checklist item lost" in e for e in as_bullets.errors)
 
 
 def test_links_annotations_and_autolink(notes):
