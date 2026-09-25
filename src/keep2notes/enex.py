@@ -26,7 +26,7 @@ TITLE_MAX = 255
 @dataclass
 class Options:
     strip_emoji_tags: bool = False
-    pinned_tag: str | None = "pinned"
+    pinned_tag: str | None = "Pinned"
     include_links: bool = True
 
 
