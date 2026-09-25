@@ -108,7 +108,7 @@ def write_chunks(notes: list[KeepNote], out_dir: Path, n_chunks: int, max_chars:
     sized = [(note_payload(n), len(n.text) + sum(len(i.text) for i in n.items) + 200) for n in notes]
     big = [p for p, s in sized if s > max_chars]
     small = [(p, s) for p, s in sized if s <= max_chars]
-    buckets: list[list[dict]] = [[] for _ in range(max(n_chunks - len(big), 1))]
+    buckets: list[list[dict]] = [[] for _ in range(max(n_chunks, 1))]
     loads = [0] * len(buckets)
     for p, s in sorted(small, key=lambda x: -x[1]):
         i = loads.index(min(loads))
