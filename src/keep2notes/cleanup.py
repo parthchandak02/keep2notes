@@ -142,12 +142,18 @@ def _norm(text: str) -> str:
 def _hashtag_line_words(note: KeepNote) -> set[str]:
     """Words on lines made only of #hashtags (typed pseudo-tags) that may be removed."""
     exempt: set[str] = set()
+    label_words = set(_words(" ".join(note.labels)))
     for line in note.text.splitlines():
         s = line.strip()
-        if s and all(tok.startswith("#") or not _words(tok) for tok in s.split()):
-            if "#" in s:
-                exempt.update(_words(s))
+        if not s.startswith("#"):
+            continue
+        if all(tok.startswith("#") or not _words(tok) for tok in s.split()) or set(_words(s)) <= label_words:
+            exempt.update(_words(s))
     return exempt
+
+
+def _one_letter_off(a: str, b: str) -> bool:
+    return len(a) == len(b) >= 3 and sum(x != y for x, y in zip(a, b)) == 1
 
 
 @dataclass
@@ -188,7 +194,7 @@ def validate_overlay(note: KeepNote, overlay: dict) -> OverlayReport:
             continue
         close = difflib.get_close_matches(w, new_list, n=1, cutoff=0.75)
         if not close and len(w) > 2:
-            close = [c for c in new_list if sorted(c) == sorted(w)][:1]
+            close = [c for c in new_list if sorted(c) == sorted(w) or _one_letter_off(w, c)][:1]
         if close and len(w) > 2:
             rep.typo_fixes.append((w, close[0]))
         else:
