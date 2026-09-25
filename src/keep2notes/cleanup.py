@@ -196,13 +196,19 @@ def validate_overlay(note: KeepNote, overlay: dict) -> OverlayReport:
     old_words = set(_words(old_text))
     rep.added = [w for w in dict.fromkeys(_words(new_text)) if w not in old_words and not any(w == t for _, t in rep.typo_fixes)]
 
-    checks = [b for b in blocks if b["type"] == "check"]
+    unused = [b for b in blocks if b["type"] == "check"]
     for item in (i for i in note.items if i.text.strip()):
         target = _norm(item.text)
-        best = max(checks, key=lambda b: difflib.SequenceMatcher(None, target, _norm(b["text"])).ratio(), default=None)
-        score = difflib.SequenceMatcher(None, target, _norm(best["text"])).ratio() if best else 0
+
+        def rank(b: dict) -> tuple[float, bool]:
+            return difflib.SequenceMatcher(None, target, _norm(b["text"])).ratio(), bool(b.get("checked")) == item.checked
+
+        best = max(unused, key=rank, default=None)
+        score, same_state = rank(best) if best else (0, False)
         if score < 0.7:
             rep.errors.append(f"checklist item lost: {item.text[:50]!r}")
-        elif bool(best.get("checked")) != item.checked:
+            continue
+        unused.remove(best)
+        if not same_state:
             rep.errors.append(f"checked state changed: {item.text[:50]!r}")
     return rep
